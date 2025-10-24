@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=RadeonInstinctMI50
+Exec=/home/testing/Desktop/RadeonInstinctMI50.sh
+Icon=utilities-terminal
+Terminal=true
