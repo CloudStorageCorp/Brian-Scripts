@@ -1,0 +1,77 @@
+#!/bin/bash
+
+# Colors
+GREEN="\033[0;32m"
+BLUE="\033[0;34m"
+YELLOW="\033[1;33m"
+RESET="\033[0m"
+
+CHECK="${GREEN}✔${RESET}"
+WARN="${YELLOW}⚠${RESET}"
+
+modprobe -r sfc
+modprobe sfc
+
+OUTPUT=$(sfkey)
+
+# State tracking
+current_block=""
+has_plus=0
+
+while IFS= read -r line; do
+    
+    # If we hit a blank line, finalize the previous block (if any)
+    if [[ -z "$line" && -n "$current_block" ]]; then
+        if (( has_plus == 1 )); then
+            echo -e " Key Status: ${CHECK} ${GREEN}Plus${RESET}"
+        else
+            echo -e " Key Status: ${WARN} No Plus"
+        fi
+        echo ""   # spacing
+        current_block=""
+        has_plus=0
+        continue
+    fi
+
+    # Detect new block starting at NIC line:
+    if [[ "$line" =~ ^ens ]]; then
+        current_block=1
+        echo -e "$line"
+        continue
+    fi
+
+    # Color match 25G products
+    if [[ "$line" =~ X2522-25G ]]; then
+        echo -e "${GREEN}${line}${RESET}"
+        continue
+    fi
+
+    # Color match 10G products
+    if [[ "$line" =~ X2522\ \(10G\) ]]; then
+        echo -e "${BLUE}${line}${RESET}"
+        continue
+    fi
+
+    # Detect Plus
+    if [[ "$line" =~ Installed.keys ]]; then
+        if [[ "$line" =~ Plus ]]; then
+            has_plus=1
+            line="${line/Plus/${GREEN}Plus${RESET}}"
+        fi
+        echo -e "$line"
+        continue
+    fi
+
+    # Default
+    echo -e "$line"
+
+done <<< "$OUTPUT"
+
+# Final block if no trailing newline
+if [[ -n "$current_block" ]]; then
+    if (( has_plus == 1 )); then
+        echo -e " Key Status: ${CHECK} ${GREEN}Plus${RESET}"
+    else
+        echo -e " Key Status: ${WARN} No Plus"
+    fi
+fi
