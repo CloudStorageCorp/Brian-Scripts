@@ -4,6 +4,7 @@
 GREEN="\033[0;32m"
 BLUE="\033[0;35m"
 YELLOW="\033[1;33m"
+ORANGE="\033[0;33m"
 RESET="\033[0m"
 
 CHECK="${GREEN}✔${RESET}"
@@ -50,6 +51,12 @@ while IFS= read -r line; do
     if [[ "$line" =~ X2522\ \(10G\) ]]; then
         echo -e "${BLUE}${line}${RESET}"
         continue
+    fi
+
+    # Color match 10/25GbE products
+    if [[ "$line" =~ 10\/25GbE ]]; then
+	echo -e "${ORANGE}${line}${RESET}"
+	continue
     fi
 
     # Color match 10G products
