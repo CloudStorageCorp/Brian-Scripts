@@ -1,1 +1,25 @@
-tEST
+function Test-GpuInstallation {
+    $gpuInfo = Get-WmiObject Win32_VideoController
+
+    if ($gpuInfo) {
+        Write-Host "GPU(s) detected:" -ForegroundColor Yellow
+        foreach ($gpu in $gpuInfo) {
+            if ($gpu.Caption -ne "Microsoft Basic Display Adapter") {
+                Write-Host "  Name: $($gpu.Name)"
+                Write-Host "  Adapter RAM: $([math]::Round($gpu.AdapterRAM / 1GB, 2)) GB"
+                Write-Host "  Driver Version: $($gpu.DriverVersion)"
+                Write-Host "  Status: $($gpu.Status)"
+                Write-Host ""
+            }
+        }
+        return $true
+    } else {
+        Write-Host "No GPU detected."
+        return $false
+    }
+}
+
+# Call the function to test for GPU installation
+if (Test-GpuInstallation) {
+    Write-Host "True"
+}
