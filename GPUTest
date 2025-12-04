@@ -31,7 +31,7 @@ function Test-GPUInstallation {
 }
 
 function Run-NvidiaXMLDump {
-    $xmlPath = "C:\Users\Testing\Desktop\gpu.xml"
+    $xmlPath = "C:\Users\Testing\AppData\Local\Temp\gpu.xml"
     nvidia-smi -q -x > $xmlPath
     return $xmlPath
 }
