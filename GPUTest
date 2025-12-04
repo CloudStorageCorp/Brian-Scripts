@@ -1,4 +1,4 @@
-<#
+<# 
 GPU Utility Tool
 Designed to work on Windows Systems (Win10, Win11, Server 2019+)
 Requires:
@@ -126,7 +126,7 @@ function LoadGUIresults {
     $OutputBox = New-Object System.Windows.Forms.RichTextBox
     $OutputBox.Multiline = $true
     $OutputBox.ScrollBars = "Vertical"
-    $OutputBox.Size = New-Object System.Drawing.Size(550,600)
+    $OutputBox.Size = New-Object System.Drawing.Size(550,625)
     $OutputBox.Location = New-Object System.Drawing.Point(20,70)
     $OutputBox.ReadOnly = $true
     $OutputBox.BackColor = [System.Drawing.Color]::White
@@ -139,12 +139,12 @@ function LoadGUIresults {
     $ECCOutputBox = New-Object System.Windows.Forms.RichTextBox
     $ECCOutputBox.Multiline = $true
     $ECCOutputBox.ScrollBars = "Vertical"
-    $ECCOutputBox.WordWrap = $false            # Prevent smushing, keep formatting
-    $ECCOutputBox.Size = New-Object System.Drawing.Size(580,600)  # Slightly wider for better spacing
+    $ECCOutputBox.WordWrap = $false
+    $ECCOutputBox.Size = New-Object System.Drawing.Size(650,625)
     $ECCOutputBox.Location = New-Object System.Drawing.Point(600,70)
     $ECCOutputBox.ReadOnly = $true
     $ECCOutputBox.BackColor = [System.Drawing.Color]::White
-    $ECCOutputBox.Font = New-Object System.Drawing.Font("Consolas", 15)  # Slightly bigger font
+    $ECCOutputBox.Font = New-Object System.Drawing.Font("Consolas", 15)
     $Form.Controls.Add($ECCOutputBox)
 
     # Color-coded text helper for right panel
@@ -196,16 +196,16 @@ function LoadGUIresults {
     $gpuNames = ($gpuList | ForEach-Object { $_.Name }) -join ", "
 
     Add-ColoredText "Detected GPUs:" $gpuNames
-Add-ECCColoredLine "" $ECCOutputBox
+    Add-ECCColoredLine "" $ECCOutputBox
     Add-ColoredText "Display Running in Headless Mode?:" $headless
-Add-ECCColoredLine "" $ECCOutputBox
+    Add-ECCColoredLine "" $ECCOutputBox
     Add-ColoredText "Product Name:" $product_name
     Add-ColoredText "Architecture:" $product_arch
     Add-ColoredText "Total Memory:" $mem_total
-Add-ECCColoredLine "" $ECCOutputBox
+    Add-ECCColoredLine "" $ECCOutputBox
     Add-ColoredText "ECC (Current):" $current_ecc
     Add-ColoredText "ECC (Pending):" $pending_ecc
-Add-ECCColoredLine "" $ECCOutputBox
+    Add-ECCColoredLine "" $ECCOutputBox
     Add-ColoredText "Graphics Clock:" $graphics_clock
 
     # Left panel ECC error details (color coded)
@@ -250,7 +250,7 @@ Add-ECCColoredLine "" $ECCOutputBox
     #==========================================================
     $Panel = New-Object System.Windows.Forms.Panel
     $Panel.Size = New-Object System.Drawing.Size(1100,50)
-    $Panel.Location = New-Object System.Drawing.Point(20,680)
+    $Panel.Location = New-Object System.Drawing.Point(20,705)
     $Form.Controls.Add($Panel)
 
     # ECC STATUS BUTTON
@@ -283,25 +283,42 @@ Add-ECCColoredLine "" $ECCOutputBox
     })
     $Panel.Controls.Add($btnEnableECC)
 
-    # Buttons stay unchanged
+    # RUN AIDA64
     $btnAIDA = New-Object System.Windows.Forms.Button
     $btnAIDA.Text = "Run AIDA64"
     $btnAIDA.Width = 120
-    $btnAIDA.Location = New-Object System.Drawing.Point(340,0)
+    $btnAIDA.Location = New-Object System.Drawing.Point(450,0)
     $btnAIDA.Add_Click({ Start-Process "C:\Program Files\aida64extreme688\aida64.exe" })
     $Panel.Controls.Add($btnAIDA)
 
+    # RUN 3DMARK
     $btn3D = New-Object System.Windows.Forms.Button
     $btn3D.Text = "Run 3DMark"
     $btn3D.Width = 120
-    $btn3D.Location = New-Object System.Drawing.Point(460,0)
+    $btn3D.Location = New-Object System.Drawing.Point(580,0)
     $btn3D.Add_Click({ Start-Process "C:\Program Files\UL\3DMark\3DMark.exe" })
     $Panel.Controls.Add($btn3D)
 
+    # ---------------------------
+    # REFRESH BUTTON (ADDED)
+    # ---------------------------
+    $btnRefresh = New-Object System.Windows.Forms.Button
+    $btnRefresh.Text = "Refresh"
+    $btnRefresh.Width = 120
+    $btnRefresh.Location = New-Object System.Drawing.Point(850,0)
+    $btnRefresh.Add_Click({
+        Start-Process "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`""
+        $Form.Close()
+    })
+    $Panel.Controls.Add($btnRefresh)
+
+    # ---------------------------
+    # RESTART BUTTON (UNCHANGED)
+    # ---------------------------
     $btnRestart = New-Object System.Windows.Forms.Button
     $btnRestart.Text = "Restart"
     $btnRestart.Width = 120
-    $btnRestart.Location = New-Object System.Drawing.Point(580,0)
+    $btnRestart.Location = New-Object System.Drawing.Point(980,0)
     $btnRestart.Add_Click({ Restart-Now })
     $Panel.Controls.Add($btnRestart)
 
