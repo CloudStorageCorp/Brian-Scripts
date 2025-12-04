@@ -1,7 +1,12 @@
 <#
 GPU Utility Tool
-Compatible with Windows 10, 11, Server 2019+
-Requires: nvidia-smi available in PATH
+Designed to work on Windows Systems (Win10, Win11, Server 2019+)
+Requires:
+    *nvidia-smi
+    *3DMark
+    *Aida64
+    *Powershell 5
+Designed by Brian Street 12/3/2025
 #>
 
 #-----------------------------
@@ -11,146 +16,57 @@ Requires: nvidia-smi available in PATH
 function Test-GPUInstallation {
     try {
         $gpuInfo = Get-WmiObject Win32_VideoController
-        $validGPUs = $gpuInfo | Where-Object { $_.Caption -ne "Microsoft Basic Display Adapter" }
+
+        # Remove Intel / Integrated GPU
+        $validGPUs = $gpuInfo | Where-Object { 
+            $_.Caption -notmatch "Microsoft Basic Display Adapter" -and
+            $_.Caption -notmatch "Intel" -and
+            $_.Caption -notmatch "UHD"
+        }
 
         if ($validGPUs.Count -eq 0) { return $null }
-
         return $validGPUs
     }
-    catch {
-        return $null
-    }
+    catch { return $null }
 }
 
 function Run-NvidiaXMLDump {
-    $outDir = "C:\Program Files\SMI-Info"
-    if (-Not (Test-Path $outDir)) {
-        New-Item -ItemType Directory -Path $outDir | Out-Null
-    }
-
     $xmlPath = "C:\Users\Testing\Desktop\gpu.xml"
     nvidia-smi -q -x > $xmlPath
     return $xmlPath
 }
 
 function CheckIfECCisEnabled {
-    $eccState = nvidia-smi -q | Select-String "ECC Mode"
-    if ($eccState -match "Current\s*:\s*Enabled") { return $true }
-    return $false
+    $eccState = nvidia-smi -q | Select-String "Current.*ECC"
+    return ($eccState -match "Enabled")
 }
 
 function EnableECC {
-    Write-Output "Enabling ECC Mode..."
-    nvidia-smi -e 1
+    return (nvidia-smi -e 1 2>&1)
 }
 
-function CheckForECCErrors {
-    return (nvidia-smi -q -d ECC)
+function Restart-Now {
+    $confirm = [System.Windows.Forms.MessageBox]::Show(
+        "Are you sure you want to restart the computer now?", 
+        "Confirm Restart", 
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Warning
+    )
+    if ($confirm -eq [System.Windows.Forms.DialogResult]::Yes) {
+        shutdown /r /t 0
+    }
 }
 
-#--------------------------------------
-#  GPU Active Adapter Check
-#--------------------------------------
 function CheckHeadless {
     $gpus = Get-WmiObject Win32_VideoController | Where-Object { $_.PNPDeviceID -ne $null }
-
     if (-not $gpus) { return $true }
 
     $primary = $gpus | Sort-Object CurrentRefreshRate -Descending | Select-Object -First 1
     $pnp = $primary.PNPDeviceID
 
     $isNVIDIA = $pnp -match "VEN_10DE"
-    $isINTEL  = $pnp -match "VEN_8086"
-    $isAMD    = $pnp -match "VEN_1002"
-
-    if ($isNVIDIA) { return $false }  # Dedicated
-    return $true  # Integrated → “headless” for your logic
-}
-
-#-----------------------------------------------------------
-#  FULL ECC PARSER (ALL CATEGORIES)
-#-----------------------------------------------------------
-function Format-ECCSection {
-    param($node, $title)
-
-    if (-not $node) { return "${title}:`r`n  No data available.`r`n" }
-
-    $output = "${title}:`r`n`r`n"
-
-    $groups = @(
-        "device_memory",
-        "register_file",
-        "l1_cache",
-        "l2_cache",
-        "texture_memory",
-        "texture_shm",
-        "cbu"
-    )
-
-    foreach ($group in $groups) {
-        $g = $node.$group
-        if ($g) {
-            $single = $g.single_bit
-            $double = $g.double_bit
-
-            $singleVal = if ($single) { $single.'#text' } else { "N/A" }
-            $doubleVal = if ($double) { $double.'#text' } else { "N/A" }
-
-            $label = $group -replace "_", " "
-            $label = (Get-Culture).TextInfo.ToTitleCase($label)
-
-            $output += "  ${label}:`r`n"
-            $output += "    Single Bit: $singleVal`r`n"
-            $output += "    Double Bit: $doubleVal`r`n`r`n"
-        }
-    }
-
-    return $output
-}
-
-function Format-ECCErrors {
-    param($eccNode)
-
-    if (-not $eccNode) { return "No ECC data available." }
-
-    $volatileOut = Format-ECCSection -node $eccNode.volatile -title "ECC Errors (Volatile)"
-    $aggregateOut = Format-ECCSection -node $eccNode.aggregate -title "ECC Errors (Aggregate)"
-
-    return ($volatileOut + "`r`n" + $aggregateOut)
-}
-
-#-----------------------------
-#   SAFE RESTART
-#-----------------------------
-function Request-RestartConfirmation {
-
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-
-    $msgBox = [System.Windows.Forms.MessageBox]::Show(
-        "The system needs to restart. Continue?",
-        "Restart Required",
-        [System.Windows.Forms.MessageBoxButtons]::YesNo,
-        [System.Windows.Forms.MessageBoxIcon]::Warning
-    )
-
-    if ($msgBox -ne "Yes") { return }
-
-    for ($i = 5; $i -ge 1; $i--) {
-        [System.Windows.Forms.MessageBox]::Show(
-            "System will restart in $i seconds...",
-            "Restarting",
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Information
-        )
-        Start-Sleep -Seconds 1
-    }
-
-    Restart-Computer -Force
-}
-
-function Restart-System {
-    Request-RestartConfirmation
+    if ($isNVIDIA) { return $false }
+    return $true
 }
 
 #-----------------------------
@@ -167,7 +83,7 @@ function LoadGUIresults {
         $gpuList
     )
 
-    # Default values
+    # ========== XML DATA LOADING ==========
     $product_name  = "Unknown"
     $product_arch  = "Unknown"
     $mem_total     = "Unknown"
@@ -186,36 +102,77 @@ function LoadGUIresults {
         $current_ecc     = $gpuNode.ecc_mode.current_ecc
         $pending_ecc     = $gpuNode.ecc_mode.pending_ecc
         $graphics_clock  = $gpuNode.applications_clocks.graphics_clock
-
         $ecc_errors      = $gpuNode.ecc_errors
     }
 
-    # GUI Window
+    # ========== MAIN WINDOW ==========
     $Form = New-Object System.Windows.Forms.Form
     $Form.Text = "GPU Diagnostic Utility"
-    $Form.Size = New-Object System.Drawing.Size(600, 650)
+    $Form.Size = New-Object System.Drawing.Size(1280, 780)  # Increased height
     $Form.FormBorderStyle = "FixedDialog"
     $Form.MaximizeBox = $false
 
-    # Title Label
+    # Title
     $Title = New-Object System.Windows.Forms.Label
     $Title.Text = "GPU DOUTTI"
     $Title.Font = New-Object System.Drawing.Font("Arial",20,[System.Drawing.FontStyle]::Bold)
     $Title.AutoSize = $true
-    $Title.Location = New-Object System.Drawing.Point(150,20)
+    $Title.Location = New-Object System.Drawing.Point(450,20)
     $Form.Controls.Add($Title)
 
-    # RichTextBox
+    #==========================================================
+    # LEFT PANEL — Original Output Box
+    #==========================================================
     $OutputBox = New-Object System.Windows.Forms.RichTextBox
     $OutputBox.Multiline = $true
     $OutputBox.ScrollBars = "Vertical"
-    $OutputBox.Size = New-Object System.Drawing.Size(550,500)
+    $OutputBox.Size = New-Object System.Drawing.Size(550,600)
     $OutputBox.Location = New-Object System.Drawing.Point(20,70)
     $OutputBox.ReadOnly = $true
     $OutputBox.BackColor = [System.Drawing.Color]::White
     $OutputBox.Font = New-Object System.Drawing.Font("Consolas", 16)
+    $Form.Controls.Add($OutputBox)
 
-    # Helper function to add colored text
+    #==========================================================
+    # RIGHT PANEL — ECC Command Output Box with color coding
+    #==========================================================
+    $ECCOutputBox = New-Object System.Windows.Forms.RichTextBox
+    $ECCOutputBox.Multiline = $true
+    $ECCOutputBox.ScrollBars = "Vertical"
+    $ECCOutputBox.WordWrap = $false            # Prevent smushing, keep formatting
+    $ECCOutputBox.Size = New-Object System.Drawing.Size(580,600)  # Slightly wider for better spacing
+    $ECCOutputBox.Location = New-Object System.Drawing.Point(600,70)
+    $ECCOutputBox.ReadOnly = $true
+    $ECCOutputBox.BackColor = [System.Drawing.Color]::White
+    $ECCOutputBox.Font = New-Object System.Drawing.Font("Consolas", 15)  # Slightly bigger font
+    $Form.Controls.Add($ECCOutputBox)
+
+    # Color-coded text helper for right panel
+    function Add-ECCColoredLine {
+        param(
+            [string]$text,
+            [System.Windows.Forms.RichTextBox]$box
+        )
+
+        $color = [System.Drawing.Color]::Black
+
+        if ($text -match "error|failed|disabled|unsupported|single bit|double bit|critical") {
+            $color = [System.Drawing.Color]::Red
+        }
+        elseif ($text -match "ECC|Mode|GPU|Status|Device|Attached|Driver|CUDA|Timestamp|Volatile|Current|Pending|Correctable|Uncorrectable|Aggregate|Threshold|Parity|SEC-DED|Channel|Sources|Microcontroller|PCIE|SM|Cache|Memory") {
+            $color = [System.Drawing.Color]::Blue
+        }
+
+        $start = $box.TextLength
+        $box.AppendText("$text`r`n")
+        $box.Select($start, $text.Length)
+        $box.SelectionColor = $color
+        $box.SelectionLength = 0
+    }
+
+    #==========================================================
+    # Populate left panel with color coding
+    #==========================================================
     function Add-ColoredText {
         param(
             [string]$label,
@@ -236,25 +193,22 @@ function LoadGUIresults {
         $OutputBox.SelectionLength = 0
     }
 
-    # Populate RichTextBox
     $gpuNames = ($gpuList | ForEach-Object { $_.Name }) -join ", "
 
     Add-ColoredText "Detected GPUs:" $gpuNames
-    $OutputBox.AppendText("`r`n")  # blank line
+Add-ECCColoredLine "" $ECCOutputBox
     Add-ColoredText "Display Running in Headless Mode?:" $headless
-    $OutputBox.AppendText("`r`n")  # blank line
-    Add-ColoredText "ECC Enabled:" $eccEnabled
-    $OutputBox.AppendText("`r`n")  # blank line
+Add-ECCColoredLine "" $ECCOutputBox
     Add-ColoredText "Product Name:" $product_name
     Add-ColoredText "Architecture:" $product_arch
     Add-ColoredText "Total Memory:" $mem_total
-    
-    $OutputBox.AppendText("`r`n")  # blank line
+Add-ECCColoredLine "" $ECCOutputBox
     Add-ColoredText "ECC (Current):" $current_ecc
     Add-ColoredText "ECC (Pending):" $pending_ecc
+Add-ECCColoredLine "" $ECCOutputBox
     Add-ColoredText "Graphics Clock:" $graphics_clock
 
-    # Add ECC Errors if available
+    # Left panel ECC error details (color coded)
     if ($ecc_errors) {
         $OutputBox.AppendText("`r`nECC Errors:`r`n`r`n")
         $groups = @(
@@ -272,14 +226,17 @@ function LoadGUIresults {
             if ($node) {
                 $label = ($group -replace "_", " ") -replace "\b(\w)", { $_.Value.ToUpper() }
                 $OutputBox.AppendText("${label}:`r`n")
+
                 $single = $node.single_bit.'#text'
                 $double = $node.double_bit.'#text'
 
+                # Single
                 $OutputBox.SelectionColor = [System.Drawing.Color]::Black
                 $OutputBox.AppendText("  Single Bit: ")
                 $OutputBox.SelectionColor = if ([int]$single -gt 0) { [System.Drawing.Color]::Red } else { [System.Drawing.Color]::Black }
                 $OutputBox.AppendText("$single`r`n")
 
+                # Double
                 $OutputBox.SelectionColor = [System.Drawing.Color]::Black
                 $OutputBox.AppendText("  Double Bit: ")
                 $OutputBox.SelectionColor = if ([int]$double -gt 0) { [System.Drawing.Color]::Red } else { [System.Drawing.Color]::Black }
@@ -288,60 +245,82 @@ function LoadGUIresults {
         }
     }
 
-    $Form.Controls.Add($OutputBox)
-
-    # Buttons Panel
+    #==========================================================
+    # BUTTON PANEL
+    #==========================================================
     $Panel = New-Object System.Windows.Forms.Panel
-    $Panel.Size = New-Object System.Drawing.Size(580,50)
-    $Panel.Location = New-Object System.Drawing.Point(10,580)
+    $Panel.Size = New-Object System.Drawing.Size(1100,50)
+    $Panel.Location = New-Object System.Drawing.Point(20,680)
     $Form.Controls.Add($Panel)
 
-    $btnECC = New-Object System.Windows.Forms.Button
-    $btnECC.Text = "Enable ECC"
-    $btnECC.Width = 120
-    $btnECC.Add_Click({ EnableECC })
-    $Panel.Controls.Add($btnECC)
+    # ECC STATUS BUTTON
+    $btnECCStatus = New-Object System.Windows.Forms.Button
+    $btnECCStatus.Text = "ECC Status"
+    $btnECCStatus.Width = 160
+    $btnECCStatus.Add_Click({
+        $ECCOutputBox.Clear()
+        Add-ECCColoredLine "Running: nvidia-smi -q -d ECC" $ECCOutputBox
+        Add-ECCColoredLine "" $ECCOutputBox
+        $result = nvidia-smi -q -d ECC 2>&1
+        $result -split "`r?`n" | ForEach-Object {
+            Add-ECCColoredLine $_ $ECCOutputBox
+        }
+        Add-ECCColoredLine "" $ECCOutputBox
+        Add-ECCColoredLine "To enable ECC, it may require reboot:" $ECCOutputBox
+        Add-ECCColoredLine "nvidia-smi -e 1" $ECCOutputBox
+    })
+    $Panel.Controls.Add($btnECCStatus)
 
+    # ENABLE ECC BUTTON
+    $btnEnableECC = New-Object System.Windows.Forms.Button
+    $btnEnableECC.Text = "Enable ECC"
+    $btnEnableECC.Width = 160
+    $btnEnableECC.Location = New-Object System.Drawing.Point(170,0)
+    $btnEnableECC.Add_Click({
+        $ECCOutputBox.Clear()
+        $result = nvidia-smi -e 1 2>&1
+        $ECCOutputBox.Text = $result + "`r`n`r`nRestart may be required."
+    })
+    $Panel.Controls.Add($btnEnableECC)
+
+    # Buttons stay unchanged
     $btnAIDA = New-Object System.Windows.Forms.Button
     $btnAIDA.Text = "Run AIDA64"
     $btnAIDA.Width = 120
-    $btnAIDA.Location = New-Object System.Drawing.Point(140,0)
-    $btnAIDA.Add_Click({ Start-Process "aida64.exe" })
+    $btnAIDA.Location = New-Object System.Drawing.Point(340,0)
+    $btnAIDA.Add_Click({ Start-Process "C:\Program Files\aida64extreme688\aida64.exe" })
     $Panel.Controls.Add($btnAIDA)
 
     $btn3D = New-Object System.Windows.Forms.Button
     $btn3D.Text = "Run 3DMark"
     $btn3D.Width = 120
-    $btn3D.Location = New-Object System.Drawing.Point(280,0)
-    $btn3D.Add_Click({ Start-Process "3dmark.exe" })
+    $btn3D.Location = New-Object System.Drawing.Point(460,0)
+    $btn3D.Add_Click({ Start-Process "C:\Program Files\UL\3DMark\3DMark.exe" })
     $Panel.Controls.Add($btn3D)
 
     $btnRestart = New-Object System.Windows.Forms.Button
     $btnRestart.Text = "Restart"
     $btnRestart.Width = 120
-    $btnRestart.Location = New-Object System.Drawing.Point(420,0)
-    $btnRestart.Add_Click({ Restart-System })
+    $btnRestart.Location = New-Object System.Drawing.Point(580,0)
+    $btnRestart.Add_Click({ Restart-Now })
     $Panel.Controls.Add($btnRestart)
 
     $Form.ShowDialog()
 }
 
 #-----------------------------
-#   MAIN LOGIC (GUI ALWAYS LOADS)
+#   MAIN LOGIC
 #-----------------------------
-
 $gpuList = Test-GPUInstallation
 $eccEnabled = $false
-$headless = $true
-$xmlPath = $null
+$headless   = $true
+$xmlPath    = $null
 
 if ($gpuList) {
     $eccEnabled = CheckIfECCisEnabled
-    $headless = CheckHeadless
+    $headless   = CheckHeadless
 
-    # Only dump XML if GPU + nvidia-smi available
     try { $xmlPath = Run-NvidiaXMLDump } catch {}
 }
 
-# GUI ALWAYS loads
 LoadGUIresults -xmlPath $xmlPath -eccEnabled $eccEnabled -headless $headless -gpuList $gpuList
