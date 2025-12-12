@@ -13,6 +13,8 @@ WARN="${YELLOW}⚠${RESET}"
 modprobe -r sfc
 modprobe sfc
 
+until sfkey >/dev/null 2>&1; do sleep 0.2; done
+
 OUTPUT=$(sfkey)
 
 # State tracking
@@ -88,3 +90,4 @@ if [[ -n "$current_block" ]]; then
         echo -e " Key Status: ${WARN} No Plus"
     fi
 fi
+
