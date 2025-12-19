@@ -1,0 +1,71 @@
+import requests
+from bs4 import BeautifulSoup
+import json
+import time
+import re
+
+BASE_URL = "https://www.techpowerup.com"
+
+SEED_URLS = [
+    "https://www.techpowerup.com/gpu-specs/?f=mfgr_NVIDIA",
+    "https://www.techpowerup.com/gpu-specs/?f=mfgr_AMD",
+    "https://www.techpowerup.com/gpu-specs/?f=mfgr_Intel"
+]
+
+HEADERS = {
+    "User-Agent": "GPU-Lookup-Indexer/1.0"
+}
+
+def normalize_name(name):
+    return re.sub(r"\s+", " ", name.lower().strip())
+
+def scrape_vendor(url):
+    r = requests.get(url, headers=HEADERS, timeout=10)
+    r.raise_for_status()
+
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    gpu_map = {}
+
+    for a in soup.select('a[href^="/gpu-specs/"]'):
+        href = a.get("href")
+        text = a.text.strip()
+
+        if not text or ".c" not in href:
+            continue
+
+        match = re.search(r"\.(c\d+)$", href)
+        if not match:
+            continue
+
+        gpu_id = match.group(1)
+        key = normalize_name(text)
+
+        gpu_map[key] = {
+            "id": gpu_id,
+            "url": BASE_URL + href
+        }
+
+    return gpu_map
+
+def scrape_all():
+    all_gpus = {}
+
+    for url in SEED_URLS:
+        print(f"Scraping: {url}")
+        vendor_gpus = scrape_vendor(url)
+
+        for k, v in vendor_gpus.items():
+            all_gpus[k] = v
+
+        time.sleep(1.0)  # polite delay
+
+    return all_gpus
+
+if __name__ == "__main__":
+    gpu_data = scrape_all()
+
+    with open("gpu_lookup.json", "w", encoding="utf-8") as f:
+        json.dump(gpu_data, f, indent=2, sort_keys=True)
+
+    print(f"\nSaved {len(gpu_data)} GPU entries to gpu_lookup.json")
