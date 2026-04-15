@@ -10,6 +10,12 @@ Designed by Brian Street 12/3/2025
 #>
 
 #-----------------------------
+#   Set Global Variables
+#-----------------------------
+
+
+
+#-----------------------------
 #   FUNCTIONS
 #-----------------------------
 
@@ -21,7 +27,8 @@ function Test-GPUInstallation {
         $validGPUs = $gpuInfo | Where-Object { 
             $_.Caption -notmatch "Microsoft Basic Display Adapter" -and
             $_.Caption -notmatch "Intel" -and
-            $_.Caption -notmatch "UHD"
+            $_.Caption -notmatch "UHD" -and
+            $_.Caption -notmatch "NVIDIA GeForce GT 710"
         }
 
         if ($validGPUs.Count -eq 0) { return $null }
@@ -58,15 +65,16 @@ function Restart-Now {
 }
 
 function CheckHeadless {
-    $gpus = Get-WmiObject Win32_VideoController | Where-Object { $_.PNPDeviceID -ne $null }
-    if (-not $gpus) { return $true }
+    [xml]$xmlContents = Get-Content "C:\Users\Testing\AppData\Local\Temp\gpu.xml"
+    $isHeadless = $xmlContents.nvidia_smi_log.gpu.driver_model.current_dm
 
-    $primary = $gpus | Sort-Object CurrentRefreshRate -Descending | Select-Object -First 1
-    $pnp = $primary.PNPDeviceID
+    if ($isHeadless -eq 'TCC'){
+        return $true
+    }
 
-    $isNVIDIA = $pnp -match "VEN_10DE"
-    if ($isNVIDIA) { return $false }
-    return $true
+    if ($isHeadless -eq 'WDDM'){
+        return $false
+    }
 }
 
 #-----------------------------
@@ -87,10 +95,10 @@ function LoadGUIresults {
     $product_name  = "Unknown"
     $product_arch  = "Unknown"
     $mem_total     = "Unknown"
+    $graphics_clock = "Unknown"
     $current_ecc   = "Unknown"
     $pending_ecc   = "Unknown"
     $ecc_errors    = $null
-    $graphics_clock = "Unknown"
 
     if ($xmlPath -and (Test-Path $xmlPath)) {
         [xml]$xml = Get-Content $xmlPath
@@ -99,22 +107,51 @@ function LoadGUIresults {
         $product_name    = $gpuNode.product_name
         $product_arch    = $gpuNode.product_architecture
         $mem_total       = $gpuNode.fb_memory_usage.total
+        $vbiosvers       = $gpuNode.vbios_version
+        $inforomvers     = $gpuNode.inforom_version.img_version
+        $ecc_errors      = $gpuNode.ecc_errors
         $current_ecc     = $gpuNode.ecc_mode.current_ecc
         $pending_ecc     = $gpuNode.ecc_mode.pending_ecc
-        $graphics_clock  = $gpuNode.applications_clocks.graphics_clock
-        $ecc_errors      = $gpuNode.ecc_errors
+        $current_graphics_clock  = $gpuNode.clocks.graphics_clock
+        $max_graphics_clock  = $gpuNode.max_clocks.graphics_clock
+        $driverVersion   = $xml.nvidia_smi_log.driver_version
+        $serialNumber    = $gpuNode.serial
+        $displayActive   = $gpuNode.display_active
+        $boardPartNumber = $gpuNode.board_part_number
     }
 
     # ========== MAIN WINDOW ==========
     $Form = New-Object System.Windows.Forms.Form
     $Form.Text = "GPU Diagnostic Utility"
-    $Form.Size = New-Object System.Drawing.Size(1280, 780)  # Increased height
+    $Form.Size = New-Object System.Drawing.Size(1380, 780)  # Increased height
     $Form.FormBorderStyle = "FixedDialog"
     $Form.MaximizeBox = $false
+    $Form.BackColor = [System.Drawing.Color]::LightBlue
+
+
+
+
+    $tabControl = New-Object System.Windows.Forms.TabControl
+    $tabControl.Size = "350,200"
+    $tabControl.Location = "10,10"
+
+    $tab1 = New-Object System.Windows.Forms.TabPage
+    $tab1.Text = "Test Main Page"
+
+    $tab2 = New-Object System.Windows.Forms.TabPage
+    $tab2.Text = "Test Settings"
+
+    $tabControl.Controls.Add($tab1)
+    $tabControl.Controls.Add($tab2)
+
+#    $form.Controls.Add($tabControl)
+
+
+
 
     # Title
     $Title = New-Object System.Windows.Forms.Label
-    $Title.Text = "GPU DOUTTI"
+    $Title.Text = "- GPUsoftware -"
     $Title.Font = New-Object System.Drawing.Font("Arial",20,[System.Drawing.FontStyle]::Bold)
     $Title.AutoSize = $true
     $Title.Location = New-Object System.Drawing.Point(450,20)
@@ -129,7 +166,7 @@ function LoadGUIresults {
     $OutputBox.Size = New-Object System.Drawing.Size(550,625)
     $OutputBox.Location = New-Object System.Drawing.Point(20,70)
     $OutputBox.ReadOnly = $true
-    $OutputBox.BackColor = [System.Drawing.Color]::White
+    $OutputBox.BackColor = [System.Drawing.Color]::Grey
     $OutputBox.Font = New-Object System.Drawing.Font("Consolas", 16)
     $Form.Controls.Add($OutputBox)
 
@@ -138,12 +175,13 @@ function LoadGUIresults {
     #==========================================================
     $ECCOutputBox = New-Object System.Windows.Forms.RichTextBox
     $ECCOutputBox.Multiline = $true
+    $ECCOutputBox.SelectionColor = Black
     $ECCOutputBox.ScrollBars = "Vertical"
     $ECCOutputBox.WordWrap = $false
-    $ECCOutputBox.Size = New-Object System.Drawing.Size(650,625)
+    $ECCOutputBox.Size = New-Object System.Drawing.Size(750,625)
     $ECCOutputBox.Location = New-Object System.Drawing.Point(600,70)
     $ECCOutputBox.ReadOnly = $true
-    $ECCOutputBox.BackColor = [System.Drawing.Color]::White
+    $ECCOutputBox.BackColor = [System.Drawing.Color]::DarkGrey
     $ECCOutputBox.Font = New-Object System.Drawing.Font("Consolas", 15)
     $Form.Controls.Add($ECCOutputBox)
 
@@ -196,67 +234,42 @@ function LoadGUIresults {
     $gpuNames = ($gpuList | ForEach-Object { $_.Name }) -join ", "
 
     Add-ColoredText "Detected GPUs:" $gpuNames
-    Add-ECCColoredLine "" $ECCOutputBox
+    Add-ColoredText "---------------------------------------------" 
     Add-ColoredText "Display Running in Headless Mode?:" $headless
-    Add-ECCColoredLine "" $ECCOutputBox
-    Add-ColoredText "Product Name:" $product_name
+    Add-ColoredText "Display Active?:" $displayActive
+    Add-ColoredText "---------------------------------------------" 
+    Add-ColoredText "Product Name:" $product_name 
     Add-ColoredText "Architecture:" $product_arch
+    Add-ColoredText "---------------------------------------------" 
     Add-ColoredText "Total Memory:" $mem_total
-    Add-ECCColoredLine "" $ECCOutputBox
+    Add-ColoredText "---------------------------------------------" 
+    Add-ColoredText "VBIOS Version:" $vbiosvers
+    Add-ColoredText "InfoROM Version:" $inforomvers
+    Add-ColoredText "Driver Version:" $driverVersion
+    Add-ColoredText "Serial Number:" $serialNumber
+    Add-ColoredText "Board Part Number:" $boardPartNumber
+    Add-ColoredText "---------------------------------------------" 
+    Add-ColoredText "Graphics Clock (Current):" $current_graphics_clock
+    Add-ColoredText "Graphics Clock (Max):" $max_graphics_clock
+    Add-ColoredText "--------------------------------------------" 
     Add-ColoredText "ECC (Current):" $current_ecc
     Add-ColoredText "ECC (Pending):" $pending_ecc
-    Add-ECCColoredLine "" $ECCOutputBox
-    Add-ColoredText "Graphics Clock:" $graphics_clock
 
-    # Left panel ECC error details (color coded)
-    if ($ecc_errors) {
-        $OutputBox.AppendText("`r`nECC Errors:`r`n`r`n")
-        $groups = @(
-            "device_memory",
-            "register_file",
-            "l1_cache",
-            "l2_cache",
-            "texture_memory",
-            "texture_shm",
-            "cbu"
-        )
-
-        foreach ($group in $groups) {
-            $node = $ecc_errors.volatile.$group
-            if ($node) {
-                $label = ($group -replace "_", " ") -replace "\b(\w)", { $_.Value.ToUpper() }
-                $OutputBox.AppendText("${label}:`r`n")
-
-                $single = $node.single_bit.'#text'
-                $double = $node.double_bit.'#text'
-
-                # Single
-                $OutputBox.SelectionColor = [System.Drawing.Color]::Black
-                $OutputBox.AppendText("  Single Bit: ")
-                $OutputBox.SelectionColor = if ([int]$single -gt 0) { [System.Drawing.Color]::Red } else { [System.Drawing.Color]::Black }
-                $OutputBox.AppendText("$single`r`n")
-
-                # Double
-                $OutputBox.SelectionColor = [System.Drawing.Color]::Black
-                $OutputBox.AppendText("  Double Bit: ")
-                $OutputBox.SelectionColor = if ([int]$double -gt 0) { [System.Drawing.Color]::Red } else { [System.Drawing.Color]::Black }
-                $OutputBox.AppendText("$double`r`n`r`n")
-            }
-        }
-    }
 
     #==========================================================
     # BUTTON PANEL
     #==========================================================
     $Panel = New-Object System.Windows.Forms.Panel
-    $Panel.Size = New-Object System.Drawing.Size(1100,50)
+    $Panel.Size = New-Object System.Drawing.Size(1330,50)
     $Panel.Location = New-Object System.Drawing.Point(20,705)
     $Form.Controls.Add($Panel)
+    $btnColor = "White"
 
     # ECC STATUS BUTTON
     $btnECCStatus = New-Object System.Windows.Forms.Button
     $btnECCStatus.Text = "ECC Status"
     $btnECCStatus.Width = 160
+    $btnECCStatus.BackColor = [System.Drawing.Color]::$btnColor
     $btnECCStatus.Add_Click({
         $ECCOutputBox.Clear()
         Add-ECCColoredLine "Running: nvidia-smi -q -d ECC" $ECCOutputBox
@@ -275,6 +288,7 @@ function LoadGUIresults {
     $btnEnableECC = New-Object System.Windows.Forms.Button
     $btnEnableECC.Text = "Enable ECC"
     $btnEnableECC.Width = 160
+    $btnEnableECC.BackColor = [System.Drawing.Color]::$btnColor
     $btnEnableECC.Location = New-Object System.Drawing.Point(170,0)
     $btnEnableECC.Add_Click({
         $ECCOutputBox.Clear()
@@ -283,21 +297,44 @@ function LoadGUIresults {
     })
     $Panel.Controls.Add($btnEnableECC)
 
+    # ------------------------
     # RUN AIDA64
+    # ------------------------
     $btnAIDA = New-Object System.Windows.Forms.Button
     $btnAIDA.Text = "Run AIDA64"
     $btnAIDA.Width = 120
+    $btnAIDA.BackColor = [System.Drawing.Color]::$btnColor
     $btnAIDA.Location = New-Object System.Drawing.Point(450,0)
     $btnAIDA.Add_Click({ Start-Process "C:\Program Files\aida64extreme688\aida64.exe" })
     $Panel.Controls.Add($btnAIDA)
 
+    # ------------------------
     # RUN 3DMARK
+    # ------------------------
     $btn3D = New-Object System.Windows.Forms.Button
     $btn3D.Text = "Run 3DMark"
     $btn3D.Width = 120
+    $btn3D.BackColor = [System.Drawing.Color]::$btnColor
     $btn3D.Location = New-Object System.Drawing.Point(580,0)
     $btn3D.Add_Click({ Start-Process "C:\Program Files\UL\3DMark\3DMark.exe" })
     $Panel.Controls.Add($btn3D)
+
+
+    # ------------------------
+    # LOOKUP BUTTON (ADDED)
+    # ------------------------
+    $btn3D = New-Object System.Windows.Forms.Button
+    $btn3D.Text = "GPU Lookup"
+    $btn3D.Width = 120
+    $btn3D.BackColor = [System.Drawing.Color]::$btnColor
+    $btn3D.Location = New-Object System.Drawing.Point(850,0)
+    $btn3D.Add_Click({ 
+            $encodedGPU = ($product_name -replace ' ', '%20') + '%20' + $mem_total
+            $url = "https://www.techpowerup.com/gpu-specs/?q=$encodedGPU"
+            Start-Process $url 
+        })
+    $Panel.Controls.Add($btn3D)
+
 
     # ---------------------------
     # REFRESH BUTTON (ADDED)
@@ -305,8 +342,10 @@ function LoadGUIresults {
     $btnRefresh = New-Object System.Windows.Forms.Button
     $btnRefresh.Text = "Refresh"
     $btnRefresh.Width = 120
-    $btnRefresh.Location = New-Object System.Drawing.Point(850,0)
+    $btnRefresh.BackColor = [System.Drawing.Color]::$btnColor
+    $btnRefresh.Location = New-Object System.Drawing.Point(1080,0)
     $btnRefresh.Add_Click({
+        #LoadGUIresults -xmlPath $xmlPath -eccEnabled $eccEnabled -headless $headless -gpuList $gpuList
         Start-Process "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`""
         $Form.Close()
     })
@@ -318,7 +357,8 @@ function LoadGUIresults {
     $btnRestart = New-Object System.Windows.Forms.Button
     $btnRestart.Text = "Restart"
     $btnRestart.Width = 120
-    $btnRestart.Location = New-Object System.Drawing.Point(980,0)
+    $btnRestart.BackColor = [System.Drawing.Color]::$btnColor
+    $btnRestart.Location = New-Object System.Drawing.Point(1210,0)
     $btnRestart.Add_Click({ Restart-Now })
     $Panel.Controls.Add($btnRestart)
 
