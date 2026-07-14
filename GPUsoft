@@ -9,10 +9,19 @@ Requires:
 Designed by Brian Street 12/3/2025
 #>
 
-#-----------------------------
-#   Set Global Variables
-#-----------------------------
 
+#-----------------------------
+#     Quick PATH and Dict Variables
+#-----------------------------
+$localxmldir = "C:\Users\BrianStreet\AppData\Local\Temp\gpu.xml"
+$aidaPATH = "C:\Program Files\aida64extreme688\aida64.exe"
+$3dmarkPATH = "C:\Program Files\UL\3DMark\3DMark.exe"
+
+    ##Known display GPUs that we don't want the info for
+$knownDisplayGPUs = @(
+    "GeForce GT 710",
+    "Quadro K620"
+)
 
 
 #-----------------------------
@@ -28,7 +37,8 @@ function Test-GPUInstallation {
             $_.Caption -notmatch "Microsoft Basic Display Adapter" -and
             $_.Caption -notmatch "Intel" -and
             $_.Caption -notmatch "UHD" -and
-            $_.Caption -notmatch "NVIDIA GeForce GT 710"
+            $_.Caption -notmatch "NVIDIA GeForce GT 710" -and
+            $_.Caption -notmatch "NVIDIA Quadro K620"
         }
 
         if ($validGPUs.Count -eq 0) { return $null }
@@ -38,8 +48,17 @@ function Test-GPUInstallation {
 }
 
 function Run-NvidiaXMLDump {
-    $xmlPath = "C:\Users\Testing\AppData\Local\Temp\gpu.xml"
-    nvidia-smi -q -x > $xmlPath
+    $xmlPath = $localxmldir
+    $gpu0 = nvidia-smi --query-gpu=name --format=csv,noheader | Select-Object -First 1
+
+    ##Check if the first GPU is a display one that we use
+    if ($gpu0 -in $knownDisplayGPUs) {
+        nvidia-smi -i 1,2,3 -q -x > $xmlPath
+    }
+    else {
+        nvidia-smi -q -x > $xmlPath
+    }
+
     return $xmlPath
 }
 
@@ -65,7 +84,7 @@ function Restart-Now {
 }
 
 function CheckHeadless {
-    [xml]$xmlContents = Get-Content "C:\Users\Testing\AppData\Local\Temp\gpu.xml"
+    [xml]$xmlContents = Get-Content $localxmldir
     $isHeadless = $xmlContents.nvidia_smi_log.gpu.driver_model.current_dm
 
     if ($isHeadless -eq 'TCC'){
@@ -77,11 +96,124 @@ function CheckHeadless {
     }
 }
 
+function LoadAPIPreview {
+#    [OutputType([int])]
+    $Form = New-Object System.Windows.Forms.Form
+    $Form.Text = "GPU Data Send Preview"
+    $Form.Size = New-Object System.Drawing.Size(900, 700)  # Increased height
+    $Form.FormBorderStyle = "FixedDialog"
+    $Form.MaximizeBox = $false
+    $Form.BackColor = [System.Drawing.Color]::LightBlue
+
+    # Title
+    $Title = New-Object System.Windows.Forms.Label
+    $Title.Text = "Please Review Data"
+    $Title.Font = New-Object System.Drawing.Font("Arial",20,[System.Drawing.FontStyle]::Bold)
+    $Title.AutoSize = $true
+    $Title.Location = New-Object System.Drawing.Point(300,20)
+    $Form.Controls.Add($Title)
+
+    # Body
+    $OutputBox = New-Object System.Windows.Forms.RichTextBox
+    $OutputBox.Multiline = $true
+    $OutputBox.ScrollBars = "Vertical"
+    $OutputBox.Size = New-Object System.Drawing.Size(850,500)
+    $OutputBox.Location = New-Object System.Drawing.Point(20,70)
+    $OutputBox.ReadOnly = $true
+    $OutputBox.BackColor = [System.Drawing.Color]::Grey
+    $OutputBox.Font = New-Object System.Drawing.Font("Consolas", 16)
+    if (Test-Path $localxmldir) {
+       $OutputBox.Text = Get-Content -Path $localxmldir -Raw
+    }
+    else {
+        $OutputBox.Text = "XML file can not be found at: $localxmldir"
+    }
+    $Form.Controls.Add($OutputBox)
+
+
+    # Label for Input Field
+    $poLabel = New-Object System.Windows.Forms.Label
+    $poLabel.Text = "PO Number:"
+    $poLabel.Location = New-Object System.Drawing.Point(325,600)
+    $poLabel.Size = New-Object System.Drawing.Size(80,20)
+    $Form.Controls.Add($poLabel)
+
+
+    # Input Field for PO
+    $poInput = New-Object System.Windows.Forms.TextBox
+    $poInput.Location = New-Object System.Drawing.Point(450,600)
+    $poInput.Size = New-Object System.Drawing.Size(100,20)
+    $Form.Controls.Add($poInput)
+
+
+    # Buttons
+    $Panel = New-Object System.Windows.Forms.Panel
+    $Panel.Size = New-Object System.Drawing.Size(850,50)
+    $Panel.Location = New-Object System.Drawing.Point(375,625)
+    $Form.Controls.Add($Panel)
+    $btnColor = "White"
+    $btnECCStatus = New-Object System.Windows.Forms.Button
+    $btnECCStatus.Text = "Send To API"
+    $btnECCStatus.Width = 120
+    $btnECCStatus.BackColor = [System.Drawing.Color]::$btnColor
+    $btnECCStatus.Add_Click({
+        LoginToAPI
+        if (LoginToAPI) {
+            SendToAPI -poValue $poInput.Text
+        }
+    })
+    $Panel.Controls.Add($btnECCStatus)
+
+    $Form.ShowDialog()
+
+#    return [int]$poInput.Text
+}
+
+function LoginToAPI {
+    [OutputType([bool])]
+    
+    $loginBody = @{
+        email = "wipe_service@cloudglobalonline.com"
+        password = "zwe74Sdac5!"
+        device_name = "GPUsoft"
+    } | ConvertTo-Json
+
+    $loginResponse = Invoke-RestMethod `
+        -Uri "https://tlfront.cshays.us/api/v1/diskInfoUserLogin" `
+        -Method Post `
+        -Body $loginBody `
+        -ContentType "application/json"
+
+    $accesstoken = $loginResponse.token.access_token
+
+    if ($accessToken) {
+        return $true
+    }
+    else {
+        return $false
+    }
+}
+
+function SendToAPI {
+    param(
+        [int]$poValue
+    )
+    if (LoginToAPI) {
+        [System.Windows.Forms.MessageBox]::Show($poValue, "T")
+    }
+    else {
+        [System.Windows.Forms.MessageBox]::Show($poValue, "F")
+    }
+}
+
+
+
 #-----------------------------
 #   GUI LOADER
 #-----------------------------
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+
 
 function LoadGUIresults {
     param(
@@ -130,6 +262,7 @@ function LoadGUIresults {
 
 
 
+##############################  TESTING OUT A TAB SYSTEM, IS NOT FUNCTIONAL AT THE MOMENT #######################################
 
     $tabControl = New-Object System.Windows.Forms.TabControl
     $tabControl.Size = "350,200"
@@ -144,14 +277,14 @@ function LoadGUIresults {
     $tabControl.Controls.Add($tab1)
     $tabControl.Controls.Add($tab2)
 
-#    $form.Controls.Add($tabControl)
+#    $form.Controls.Add($tabControl)      ## WAS TESTING TABS ^^
 
 
 
 
     # Title
     $Title = New-Object System.Windows.Forms.Label
-    $Title.Text = "- GPUsoftware -"
+    $Title.Text = "- GPUsoft -"
     $Title.Font = New-Object System.Drawing.Font("Arial",20,[System.Drawing.FontStyle]::Bold)
     $Title.AutoSize = $true
     $Title.Location = New-Object System.Drawing.Point(450,20)
@@ -265,10 +398,11 @@ function LoadGUIresults {
     $Form.Controls.Add($Panel)
     $btnColor = "White"
 
+
     # ECC STATUS BUTTON
     $btnECCStatus = New-Object System.Windows.Forms.Button
     $btnECCStatus.Text = "ECC Status"
-    $btnECCStatus.Width = 160
+    $btnECCStatus.Width = 120
     $btnECCStatus.BackColor = [System.Drawing.Color]::$btnColor
     $btnECCStatus.Add_Click({
         $ECCOutputBox.Clear()
@@ -287,9 +421,9 @@ function LoadGUIresults {
     # ENABLE ECC BUTTON
     $btnEnableECC = New-Object System.Windows.Forms.Button
     $btnEnableECC.Text = "Enable ECC"
-    $btnEnableECC.Width = 160
+    $btnEnableECC.Width = 120
     $btnEnableECC.BackColor = [System.Drawing.Color]::$btnColor
-    $btnEnableECC.Location = New-Object System.Drawing.Point(170,0)
+    $btnEnableECC.Location = New-Object System.Drawing.Point(130,0)
     $btnEnableECC.Add_Click({
         $ECCOutputBox.Clear()
         $result = nvidia-smi -e 1 2>&1
@@ -304,8 +438,8 @@ function LoadGUIresults {
     $btnAIDA.Text = "Run AIDA64"
     $btnAIDA.Width = 120
     $btnAIDA.BackColor = [System.Drawing.Color]::$btnColor
-    $btnAIDA.Location = New-Object System.Drawing.Point(450,0)
-    $btnAIDA.Add_Click({ Start-Process "C:\Program Files\aida64extreme688\aida64.exe" })
+    $btnAIDA.Location = New-Object System.Drawing.Point(350,0)
+    $btnAIDA.Add_Click({ Start-Process $aidaPATH })
     $Panel.Controls.Add($btnAIDA)
 
     # ------------------------
@@ -315,8 +449,8 @@ function LoadGUIresults {
     $btn3D.Text = "Run 3DMark"
     $btn3D.Width = 120
     $btn3D.BackColor = [System.Drawing.Color]::$btnColor
-    $btn3D.Location = New-Object System.Drawing.Point(580,0)
-    $btn3D.Add_Click({ Start-Process "C:\Program Files\UL\3DMark\3DMark.exe" })
+    $btn3D.Location = New-Object System.Drawing.Point(480,0)
+    $btn3D.Add_Click({ Start-Process $3dmarkPATH })
     $Panel.Controls.Add($btn3D)
 
 
@@ -327,13 +461,28 @@ function LoadGUIresults {
     $btn3D.Text = "GPU Lookup"
     $btn3D.Width = 120
     $btn3D.BackColor = [System.Drawing.Color]::$btnColor
-    $btn3D.Location = New-Object System.Drawing.Point(850,0)
+    $btn3D.Location = New-Object System.Drawing.Point(700,0)
     $btn3D.Add_Click({ 
             $encodedGPU = ($product_name -replace ' ', '%20') + '%20' + $mem_total
             $url = "https://www.techpowerup.com/gpu-specs/?q=$encodedGPU"
             Start-Process $url 
         })
     $Panel.Controls.Add($btn3D)
+
+
+    # ------------------------
+    # SEND TO API (ADDED)
+    # ------------------------
+    $btn3D = New-Object System.Windows.Forms.Button
+    $btn3D.Text = "Send to API"
+    $btn3D.Width = 120
+    $btn3D.BackColor = [System.Drawing.Color]::$btnColor
+    $btn3D.Location = New-Object System.Drawing.Point(830,0)
+    $btn3D.Add_Click({ 
+            LoadAPIPreview
+        })
+    $Panel.Controls.Add($btn3D)
+
 
 
     # ---------------------------
