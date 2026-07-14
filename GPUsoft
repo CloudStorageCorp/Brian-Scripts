@@ -2,7 +2,7 @@
 GPU Utility Tool
 Designed to work on Windows Systems (Win10, Win11, Server 2019+)
 Requires:
-    *nvidia-smi
+    *nvidia-smi 
     *3DMark
     *Aida64
     *Powershell 5
