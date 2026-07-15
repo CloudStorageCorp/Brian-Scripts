@@ -13,7 +13,7 @@ Designed by Brian Street 12/3/2025
 #-----------------------------
 #     Quick PATH and Dict Variables
 #-----------------------------
-$localxmldir = "C:\Users\BrianStreet\AppData\Local\Temp\gpu.xml"
+$localxmldir = "D:\GPU-Headed\gpu.xml"
 $aidaPATH = "C:\Program Files\aida64extreme688\aida64.exe"
 $3dmarkPATH = "C:\Program Files\UL\3DMark\3DMark.exe"
 
@@ -100,7 +100,7 @@ function LoadAPIPreview {
 #    [OutputType([int])]
     $Form = New-Object System.Windows.Forms.Form
     $Form.Text = "GPU Data Send Preview"
-    $Form.Size = New-Object System.Drawing.Size(900, 700)  # Increased height
+    $Form.Size = New-Object System.Drawing.Size(1790, 700)  # Increased height
     $Form.FormBorderStyle = "FixedDialog"
     $Form.MaximizeBox = $false
     $Form.BackColor = [System.Drawing.Color]::LightBlue
@@ -113,23 +113,59 @@ function LoadAPIPreview {
     $Title.Location = New-Object System.Drawing.Point(300,20)
     $Form.Controls.Add($Title)
 
-    # Body
-    $OutputBox = New-Object System.Windows.Forms.RichTextBox
-    $OutputBox.Multiline = $true
-    $OutputBox.ScrollBars = "Vertical"
-    $OutputBox.Size = New-Object System.Drawing.Size(850,500)
-    $OutputBox.Location = New-Object System.Drawing.Point(20,70)
-    $OutputBox.ReadOnly = $true
-    $OutputBox.BackColor = [System.Drawing.Color]::Grey
-    $OutputBox.Font = New-Object System.Drawing.Font("Consolas", 16)
+    # Body LEFT
+    $OutputBoxL = New-Object System.Windows.Forms.RichTextBox
+    $OutputBoxL.Multiline = $true
+    $OutputBoxL.ScrollBars = "Vertical"
+    $OutputBoxL.Size = New-Object System.Drawing.Size(850,520)
+    $OutputBoxL.Location = New-Object System.Drawing.Point(20,70)
+    $OutputBoxL.ReadOnly = $true
+    $OutputBoxL.BackColor = [System.Drawing.Color]::Grey
+    $OutputBoxL.Font = New-Object System.Drawing.Font("Consolas", 16)
     if (Test-Path $localxmldir) {
-       $OutputBox.Text = Get-Content -Path $localxmldir -Raw
+       $OutputBoxL.Text = Get-Content -Path $localxmldir -Raw
     }
     else {
-        $OutputBox.Text = "XML file can not be found at: $localxmldir"
+        $OutputBoxL.Text = "XML file can not be found at: $localxmldir"
     }
-    $Form.Controls.Add($OutputBox)
+    
+    # Body RIGHT
+    $OutputBoxR = New-Object System.Windows.Forms.RichTextBox
+    $OutputBoxR.Multiline = $true
+    $OutputBoxR.ScrollBars = "Vertical"
+    $OutputBoxR.Size = New-Object System.Drawing.Size(850,520)
+    $OutputBoxR.Location = New-Object System.Drawing.Point(900,70)
+    $OutputBoxR.ReadOnly = $true
+    $OutputBoxR.BackColor = [System.Drawing.Color]::Grey
+    $OutputBoxR.Font = New-Object System.Drawing.Font("Consolas", 16)
+    $outputText = @"
+PO Number: (Will be filled in when submitted)
 
+GPU Name: $gpuName
+
+GPU Brand: $gpuBrand
+
+GPU Mem Size: $gpuMemSize
+
+VBIOS Version: $gpuVBIOS
+
+PCIe Gen: $gpuPCIeGen
+
+PCIe Link Width: $gpuPCIeWidth
+
+Testing Machine OS: $testingOS
+
+Test Software: $testingSoftware
+
+Testing User: $testingU5ser
+
+"@
+    $OutputBoxR.Text = $outputText
+
+
+    # ADD BODY
+    $Form.Controls.Add($OutputBoxL)
+    $Form.Controls.Add($OutputBoxR)
 
     # Label for Input Field
     $poLabel = New-Object System.Windows.Forms.Label
@@ -159,7 +195,8 @@ function LoadAPIPreview {
     $btnECCStatus.Add_Click({
         LoginToAPI
         if (LoginToAPI) {
-            SendToAPI -poValue $poInput.Text
+            $gpuPayload = CreatePayload -poValue $poInput.Text
+            SendToAPI -thePayload $gpuPayload
         }
     })
     $Panel.Controls.Add($btnECCStatus)
@@ -196,15 +233,32 @@ function LoginToAPI {
 
 function SendToAPI {
     param(
+        $thePayload
+    )
+}
+
+
+function CreatePayload {
+    param(
         [int]$poValue
     )
-    if (LoginToAPI) {
-        [System.Windows.Forms.MessageBox]::Show($poValue, "T")
+
+    $payloadBody = @{ 
+        receipt_number = $poValue
+        gpu_name = $gpuName
+        gpu_brand = $gpuBrand
+        gpu_memory_size_mb = $gpuMemSize
+        gpu_vbios_version = $gpuVBIOS
+        gpu_pcie_gen = $gpuPCIeGen
+        gpu_pcie_link_width = $gpuPCIeWidth
+        testing_os = $testingOS
+        testing_software = $testingSoftware
+        testing_user = $testingUser
     }
-    else {
-        [System.Windows.Forms.MessageBox]::Show($poValue, "F")
-    }
+
+    return $payloadBody
 }
+
 
 
 
@@ -259,6 +313,7 @@ function LoadGUIresults {
     $Form.FormBorderStyle = "FixedDialog"
     $Form.MaximizeBox = $false
     $Form.BackColor = [System.Drawing.Color]::LightBlue
+
 
 
 
@@ -528,5 +583,25 @@ if ($gpuList) {
 
     try { $xmlPath = Run-NvidiaXMLDump } catch {}
 }
+
+[xml]$gpuHandle = Get-Content -Path $localxmldir -Raw
+$gpuNode = $gpuHandle.nvidia_smi_log.gpu
+
+$detectSoftware = if (CheckHeadless) {
+        "Aida64, GPUsoft (Proprietary Software), GPUtweak III, NVIDIA Toolkit"
+    }
+    else {
+        "3dMark, GPUsoft (Proprietary Software), GPUtweak III, NVIDIA Toolkit"
+    }
+  
+$gpuName = $gpuNode.product_name
+$gpuBrand = $gpuNode.product_brand
+$gpuMemSize = $gpuNode.fb_memory_usage.total
+$gpuVBIOS = $gpuNode.vbios_version
+$gpuPCIeGen = $gpuNode.pci.pci_gpu_link_info.pcie_gen.current_link_gen
+$gpuPCIeWidth = $gpuNode.pci.pci_gpu_link_info.link_widths.current_link_width
+$testingOS = (Get-CimInstance Win32_OperatingSystem).Caption
+$testingSoftware = $detectSoftware
+$testingUser = "Testing"
 
 LoadGUIresults -xmlPath $xmlPath -eccEnabled $eccEnabled -headless $headless -gpuList $gpuList
