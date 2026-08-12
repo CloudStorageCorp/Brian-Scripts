@@ -13,7 +13,7 @@ Designed by Brian Street 12/3/2025
 #-----------------------------
 #     Quick PATH and Dict Variables
 #-----------------------------
-$localxmldir = "D:\GPU-Headed\gpu.xml"
+$localxmldir = "C:\Users\BrianStreet\Desktop\GPU-Headed\gpu.xml"
 $aidaPATH = "C:\Program Files\aida64extreme688\aida64.exe"
 $3dmarkPATH = "C:\Program Files\UL\3DMark\3DMark.exe"
 
@@ -97,7 +97,6 @@ function CheckHeadless {
 }
 
 function LoadAPIPreview {
-#    [OutputType([int])]
     $Form = New-Object System.Windows.Forms.Form
     $Form.Text = "GPU Data Send Preview"
     $Form.Size = New-Object System.Drawing.Size(1790, 700)  # Increased height
@@ -120,7 +119,7 @@ function LoadAPIPreview {
     $OutputBoxL.Size = New-Object System.Drawing.Size(850,520)
     $OutputBoxL.Location = New-Object System.Drawing.Point(20,70)
     $OutputBoxL.ReadOnly = $true
-    $OutputBoxL.BackColor = [System.Drawing.Color]::Grey
+    $OutputBoxL.BackColor = [System.Drawing.Color]::Gainsboro
     $OutputBoxL.Font = New-Object System.Drawing.Font("Consolas", 16)
     if (Test-Path $localxmldir) {
        $OutputBoxL.Text = Get-Content -Path $localxmldir -Raw
@@ -136,7 +135,7 @@ function LoadAPIPreview {
     $OutputBoxR.Size = New-Object System.Drawing.Size(850,520)
     $OutputBoxR.Location = New-Object System.Drawing.Point(900,70)
     $OutputBoxR.ReadOnly = $true
-    $OutputBoxR.BackColor = [System.Drawing.Color]::Grey
+    $OutputBoxR.BackColor = [System.Drawing.Color]::Gainsboro
     $OutputBoxR.Font = New-Object System.Drawing.Font("Consolas", 16)
     $outputText = @"
 PO Number: (Will be filled in when submitted)
@@ -157,8 +156,7 @@ Testing Machine OS: $testingOS
 
 Test Software: $testingSoftware
 
-Testing User: $testingU5ser
-
+Testing User: (Will be filled in when submitted)
 "@
     $OutputBoxR.Text = $outputText
 
@@ -182,6 +180,21 @@ Testing User: $testingU5ser
     $Form.Controls.Add($poInput)
 
 
+    # Label for Testing Name Input field
+    $testerLabel = New-Object System.Windows.Forms.Label
+    $testerLabel.Text = "Tester's Name"
+    $testerLabel.Location = New-Object System.Drawing.Point(600,600)
+    $testerLabel.Size = New-Object System.Drawing.Size(80,20)
+    $Form.Controls.Add($testerLabel)
+
+    
+    #Input field for Tester name
+    $testerName = New-Object System.Windows.Forms.TextBox
+    $testerName.Location = New-Object System.Drawing.Point(700,600)
+    $testerName.Size = New-Object System.Drawing.Size(100,20)
+    $Form.Controls.Add($testerName)
+
+
     # Buttons
     $Panel = New-Object System.Windows.Forms.Panel
     $Panel.Size = New-Object System.Drawing.Size(850,50)
@@ -193,77 +206,191 @@ Testing User: $testingU5ser
     $btnECCStatus.Width = 120
     $btnECCStatus.BackColor = [System.Drawing.Color]::$btnColor
     $btnECCStatus.Add_Click({
-        LoginToAPI
-        if (LoginToAPI) {
-            $gpuPayload = CreatePayload -poValue $poInput.Text
-            SendToAPI -thePayload $gpuPayload
+        $loginResult = LoginToAPI
+        if ($loginResult.Success) {
+            # Create GPU Payload
+            $gpuPayload = CreatePayload -poValue $poInput.Text -testerNameValue $testerName.Text
+
+            # Convert XML to JSON and Save as Variable  !!! Will be used when I update to send Logs !!!
+            [xml]$rawxmlFileText = Get-Content -Path $localxmldir
+            $cleanObject = Convert-XmlNodeToObject -node $rawxmlFileText.DocumentElement
+            $rawJSONFileText = $cleanObject | ConvertTo-Json -Depth 10
+
+            # Send to API
+            SendToAPI -thePayload $gpuPayload -accessToken $loginResult.Token
+            $gpuPayload | Out-File -FilePath "$HOME\Desktop\gpuPayload.txt"
+            $loginResult.Token | Out-File -FilePath "$HOME\Desktop\loginToken.txt"
+        }
+        else {
+            Write-Host "Login failed, cannot proceed."
         }
     })
+
     $Panel.Controls.Add($btnECCStatus)
-
     $Form.ShowDialog()
-
-#    return [int]$poInput.Text
 }
 
+
 function LoginToAPI {
-    [OutputType([bool])]
-    
     $loginBody = @{
         email = "wipe_service@cloudglobalonline.com"
-        password = "zwe74Sdac5!"
+        password = ""
         device_name = "GPUsoft"
     } | ConvertTo-Json
 
-    $loginResponse = Invoke-RestMethod `
-        -Uri "https://tlfront.cshays.us/api/v1/diskInfoUserLogin" `
-        -Method Post `
-        -Body $loginBody `
-        -ContentType "application/json"
+    try {
+        $loginResponse = Invoke-RestMethod `
+            -Uri "https://tlfront.cshays.us/api/v1/diskInfoUserLogin" `
+            -Method Post `
+            -Body $loginBody `
+            -ContentType "application/json"
 
-    $accesstoken = $loginResponse.token.access_token
+        $accessToken = $loginResponse.token.access_token
 
-    if ($accessToken) {
-        return $true
+        if ($accessToken) {
+            return [PSCustomObject]@{
+                Success = $true
+                Token   = $accessToken
+            }
+        }
+        else {
+            return [PSCustomObject]@{
+                Success = $false
+                Token   = $null
+            }
+        }
     }
-    else {
-        return $false
+    catch {
+        Write-Host "Login failed: $($_.Exception.Message)" -ForegroundColor Red
+        return [PSCustomObject]@{
+            Success = $false
+            Token   = $null
+        }
     }
 }
 
+
 function SendToAPI {
     param(
-        $thePayload
+        $thePayload,
+        $accessToken
     )
+    $apiURI = "https://tlfront.cshays.us/api/v1/storeGpuTestingRecord"
+    $apiHeaders = @{
+        "Accept" = "application/json"
+        "Content-Type" = "application/json"
+        "Authorization" = "Bearer $accessToken"
+    }
+    $bodyData = $thePayload
+
+    try {
+        $response = Invoke-RestMethod -Uri $apiURI -Method Post -Headers $apiHeaders -Body $bodyData
+        return $response
+    }
+    catch {
+        Write-Host "API call failed: $($_.Exception.Message)" -ForegroundColor Red
+        if ($_.Exception.Response) {
+            $statusCode = $_.Exception.Response.StatusCode
+            Write-Host "Status code: $statusCode" -ForegroundColor Red
+        }
+        return $null
+    }
 }
 
 
 function CreatePayload {
     param(
-        [int]$poValue
+        [string]$poValue,
+        [string]$testerNameValue
     )
 
-    $payloadBody = @{ 
+    $gpuMemSizeInt = [int]($gpuMemSize -replace ' MiB', '')
+
+    $payloadBody = [ordered]@{ 
         receipt_number = $poValue
         gpu_name = $gpuName
         gpu_brand = $gpuBrand
-        gpu_memory_size_mb = $gpuMemSize
+        gpu_memory_size_mb = $gpuMemSizeInt
         gpu_vbios_version = $gpuVBIOS
         gpu_pcie_gen = $gpuPCIeGen
         gpu_pcie_link_width = $gpuPCIeWidth
         testing_os = $testingOS
         testing_software = $testingSoftware
-        testing_user = $testingUser
-    }
+        testing_user = $testerNameValue
+    } 
 
-    return $payloadBody
+    $payloadJSON = $payloadBody | ConvertTo-Json -Depth 5
+
+    return $payloadJSON
 }
 
 
+function Convert-XmlNodeToObject {
+    param([System.Xml.XmlNode]$node)
+
+    # Handle simple text-only elements (leaf nodes)
+    if ($node.NodeType -eq 'Text' -or $node.NodeType -eq 'CDATA') {
+        return $node.Value
+    }
+
+    $hasAttributes = $node.Attributes -and $node.Attributes.Count -gt 0
+    $childElements = $node.ChildNodes | Where-Object { $_.NodeType -eq 'Element' }
+    $textNodes = $node.ChildNodes | Where-Object { $_.NodeType -eq 'Text' -or $_.NodeType -eq 'CDATA' }
+
+    # SIMPLE CASE: no attributes, no child elements, just text -> return plain string
+    if (-not $hasAttributes -and -not $childElements -and $textNodes) {
+        $text = ($textNodes | ForEach-Object { $_.Value }) -join ''
+        return $text.Trim()
+    }
+
+    # SIMPLE CASE: totally empty element -> return null (or "" if you prefer)
+    if (-not $hasAttributes -and -not $childElements -and -not $textNodes) {
+        return $null
+    }
+
+    $result = [ordered]@{}
+
+    # Include attributes, if any
+    if ($hasAttributes) {
+        foreach ($attr in $node.Attributes) {
+            $result["@$($attr.Name)"] = $attr.Value
+        }
+    }
+
+    # Group child nodes by name, since XML allows repeated elements
+    $childGroups = [ordered]@{}
+
+    foreach ($child in $childElements) {
+        $childValue = Convert-XmlNodeToObject -node $child
+        if ($childGroups.Contains($child.Name)) {
+            if ($childGroups[$child.Name] -isnot [System.Collections.ArrayList]) {
+                $existing = $childGroups[$child.Name]
+                $childGroups[$child.Name] = [System.Collections.ArrayList]@($existing)
+            }
+            [void]$childGroups[$child.Name].Add($childValue)
+        } else {
+            $childGroups[$child.Name] = $childValue
+        }
+    }
+
+    # If there's mixed content (text alongside child elements), keep #text
+    if ($textNodes) {
+        $text = (($textNodes | ForEach-Object { $_.Value }) -join '').Trim()
+        if ($text) {
+            $result["#text"] = $text
+        }
+    }
+
+    foreach ($key in $childGroups.Keys) {
+        $result[$key] = $childGroups[$key]
+    }
+
+    return $result
+}
 
 
 #-----------------------------
-#   GUI LOADER
+#   GUI LOADER Function and Variables
 #-----------------------------
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -354,7 +481,7 @@ function LoadGUIresults {
     $OutputBox.Size = New-Object System.Drawing.Size(550,625)
     $OutputBox.Location = New-Object System.Drawing.Point(20,70)
     $OutputBox.ReadOnly = $true
-    $OutputBox.BackColor = [System.Drawing.Color]::Grey
+    $OutputBox.BackColor = [System.Drawing.Color]::Gainsboro
     $OutputBox.Font = New-Object System.Drawing.Font("Consolas", 16)
     $Form.Controls.Add($OutputBox)
 
@@ -363,13 +490,13 @@ function LoadGUIresults {
     #==========================================================
     $ECCOutputBox = New-Object System.Windows.Forms.RichTextBox
     $ECCOutputBox.Multiline = $true
-    $ECCOutputBox.SelectionColor = Black
+    $ECCOutputBox.SelectionColor = [System.Drawing.Color]::Black
     $ECCOutputBox.ScrollBars = "Vertical"
     $ECCOutputBox.WordWrap = $false
     $ECCOutputBox.Size = New-Object System.Drawing.Size(750,625)
     $ECCOutputBox.Location = New-Object System.Drawing.Point(600,70)
     $ECCOutputBox.ReadOnly = $true
-    $ECCOutputBox.BackColor = [System.Drawing.Color]::DarkGrey
+    $ECCOutputBox.BackColor = [System.Drawing.Color]::Gainsboro
     $ECCOutputBox.Font = New-Object System.Drawing.Font("Consolas", 15)
     $Form.Controls.Add($ECCOutputBox)
 
