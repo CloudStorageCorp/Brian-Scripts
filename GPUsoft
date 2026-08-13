@@ -233,7 +233,7 @@ Testing User: (Will be filled in when submitted)
 
 function LoginToAPI {
     $loginBody = @{
-        email = "wipe_service@cloudglobalonline.com"
+        email = ""
         password = ""
         device_name = "GPUsoft"
     } | ConvertTo-Json
@@ -275,7 +275,7 @@ function SendToAPI {
         $thePayload,
         $accessToken
     )
-    $apiURI = "https://tlfront.cshays.us/api/v1/storeGpuTestingRecord"
+    $apiURI = ""
     $apiHeaders = @{
         "Accept" = "application/json"
         "Content-Type" = "application/json"
