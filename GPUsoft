@@ -240,7 +240,7 @@ function LoginToAPI {
 
     try {
         $loginResponse = Invoke-RestMethod `
-            -Uri "https://tlfront.cshays.us/api/v1/diskInfoUserLogin" `
+            -Uri "" `
             -Method Post `
             -Body $loginBody `
             -ContentType "application/json"
